@@ -240,9 +240,9 @@ int main(void)
 	MX_USART1_UART_Init();
 	// TMC2208 configuration
 	TMC2208_Init(&huart1, Rsense);
-	//TMC2208_SetMotorCurrent(motor_current);
-	//TMC2208_SetMicrostepping(microsteps);
-	//TMC2208_SetOperationMode(false); 	// Desactivar stealthChop
+	TMC2208_SetMotorCurrent(motor_current);
+	TMC2208_SetMicrostepping(microsteps);
+	TMC2208_SetOperationMode(false); 	// Desactivar stealthChop
 
 
 	menu[CONF_STEPPER].opciones[0].valor = microsteps;
