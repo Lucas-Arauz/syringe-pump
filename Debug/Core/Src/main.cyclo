@@ -1,0 +1,17 @@
+../Core/Src/main.c:195:5:main	1
+../Core/Src/main.c:266:6:SystemClock_Config	3
+../Core/Src/main.c:306:13:MX_I2C1_Init	2
+../Core/Src/main.c:340:13:MX_TIM3_Init	4
+../Core/Src/main.c:385:13:MX_USART1_UART_Init	2
+../Core/Src/main.c:418:13:MX_GPIO_Init	1
+../Core/Src/main.c:459:6:actualizarLCD	11
+../Core/Src/main.c:507:6:manejarBotonArriba	8
+../Core/Src/main.c:528:6:manejarBotonAbajo	8
+../Core/Src/main.c:551:6:manejarBotonSeleccionar	15
+../Core/Src/main.c:578:6:HAL_GPIO_EXTI_Callback	6
+../Core/Src/main.c:596:6:HAL_TIM_PeriodElapsedCallback	4
+../Core/Src/main.c:617:5:vol_To_Steps	1
+../Core/Src/main.c:631:5:flow_To_Time	1
+../Core/Src/main.c:646:6:TMC2208_Move	1
+../Core/Src/main.c:658:6:TMC2208_Stop	1
+../Core/Src/main.c:669:6:Error_Handler	1

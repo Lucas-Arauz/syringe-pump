@@ -1,0 +1,11 @@
+../Core/Src/TMC2208.c:19:9:TMC2208_CalculateChecksum	2
+../Core/Src/TMC2208.c:28:6:TMC2208_Init	1
+../Core/Src/TMC2208.c:34:6:TMC2208_WriteRegister	1
+../Core/Src/TMC2208.c:57:10:TMC2208_ReadRegister	4
+../Core/Src/TMC2208.c:91:6:TMC2208_SetMicrostepping	15
+../Core/Src/TMC2208.c:119:6:TMC2208_SetMotorCurrent	3
+../Core/Src/TMC2208.c:142:6:TMC2208_SetOperationMode	3
+../Core/Src/TMC2208.c:160:6:TMC2208_SetPWMFrequency	3
+../Core/Src/TMC2208.c:182:6:TMC2208_SetStallGuard	1
+../Core/Src/TMC2208.c:193:10:TMC2208_GetStallGuardResult	2
+../Core/Src/TMC2208.c:205:9:TMC2208_VerifyRegister	2
