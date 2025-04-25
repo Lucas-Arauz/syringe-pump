@@ -29,6 +29,8 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <stdint.h>
+#include <math.h>
 
 /* USER CODE END Includes */
 
@@ -43,10 +45,8 @@
 /* USER CODE BEGIN PD */
 
 // Physical characteristics of the motor and the screw
-#define MOTOR_STEPS_PER_REV		200	// Cantidad de pasos por vuelta del motor
-#define SPINDLE_THREAD_PITCH	8	// Paso del husillo (mm)
-
-#define PI	3.14159
+#define PASOS_POR_VUELTA      200
+#define AVANCE_TORNILLO_MM    8.0f
 
 #define MyI2C_LCD I2C_LCD_1
 
@@ -75,12 +75,14 @@ UART_HandleTypeDef huart1;
 /* USER CODE BEGIN PV */
 
 // Physical characteristics of the syringe
-float syringe_vol = 0;	// Volumen total de la jeringa (mL)
-float syringe_internal_diameter = 0;	// Diametro interno de la jeringa (mm)
-float syringe_length;
+float volumen_jeringa = 5.0f;       // ml
+float caudal = 1.5f;        // ml/min
+float diametro = 10.0f;     // mm
+float largo = 0.0f;         // mm (se ignora si hay diámetro)
+
+uint32_t f_clk = 72000000;  // TIM2 clock (ejemplo: 72 MHz)
 
 // Stepper Configuration
-int microsteps = 256;	// Cantidad de micropasos por paso
 int motor_current = 600;	// Corriente del motor paso a paso (mA)
 float Rsense = 0.11;	// Resistencia de sensado del TMC2208 (omhs)
 
@@ -108,7 +110,7 @@ typedef enum {
 	DISPENSADO,
 	CONF_JERINGA,
 	CONF_STEPPER,
-	PRINCIPAL
+	INICIAR
 } Pantalla_t;
 
 typedef enum {
@@ -170,9 +172,13 @@ static void MX_USART1_UART_Init(void);
 static void MX_TIM3_Init(void);
 static void MX_I2C1_Init(void);
 /* USER CODE BEGIN PFP */
-int vol_To_Steps(float vol);
-int flow_To_Time(float vol, float flow);
-void TMC2208_Move(int steps, int time);
+float calcularLongitudCarrera(float volumen_ml, float diametro_mm, float largo_mm);
+uint16_t calcularMicropasosOptimos(float volumen_total_ml, float caudal_ml_min, float diametro_mm, float largo_mm, uint32_t f_clk_timer);
+uint32_t calcularCantidadPasos(float volumen_total_ml, float diametro_mm, float largo_mm, uint16_t microstepping);
+uint32_t calcularARR(float pasosPorSegundo, uint32_t f_clk_timer);
+
+
+void TMC2208_Move(void);
 void TMC2208_Stop(void);
 
 void actualizarLCD();
@@ -241,7 +247,7 @@ int main(void)
 	// TMC2208 configuration
 	TMC2208_Init(&huart1, Rsense);
 	TMC2208_SetMotorCurrent(motor_current);
-	TMC2208_SetMicrostepping(microsteps);
+	//TMC2208_SetMicrostepping(microsteps);
 	TMC2208_SetOperationMode(false); 	// Desactivar stealthChop
 
 
@@ -584,31 +590,60 @@ void manejarBotonSeleccionar()
 {
 	if (estado_actual == MENU_PRINCIPAL)
 	{
-		if (pantalla_actual == PRINCIPAL && opcion_actual == DISPENSADO)
+		if(pantalla_actual == PRINCIPAL && opcion_actual == DISPENSADO)
 		{
-			pantalla_actual = DISPENSADO; // Ir a "Conf. Jeringa"
+			pantalla_actual = DISPENSADO; // Ir a "Dispensado"
 			opcion_actual = 0;
 			desplazamiento = 0;
-		} else if(pantalla_actual == PRINCIPAL && opcion_actual == CONF_JERINGA)
+		}
+		else if(pantalla_actual == PRINCIPAL && opcion_actual == CONF_JERINGA)
 		{
-			pantalla_actual = CONF_JERINGA; // Ir a "dispensado"
+			pantalla_actual = CONF_JERINGA; // Ir a "conf jeringa"
 			opcion_actual = 0;
 			desplazamiento = 0;
-		} else if (pantalla_actual == PRINCIPAL && opcion_actual == CONF_STEPPER)
+		}
+		else if(pantalla_actual == PRINCIPAL && opcion_actual == CONF_STEPPER)
 		{
 			pantalla_actual = CONF_STEPPER; // Ir a "Conf Stepper."
 			opcion_actual = 0;
 			desplazamiento = 0;
-		} else if ( (pantalla_actual == CONF_JERINGA && opcion_actual == VOLVER_JER) || (pantalla_actual == CONF_STEPPER && opcion_actual == VOLVER_STEP) || (pantalla_actual == DISPENSADO && opcion_actual == VOLVER_DISP))
+		}
+		else if(pantalla_actual == PRINCIPAL  && opcion_actual == INICIAR)
+		{
+			if(!motor_running)
+			{
+				uint16_t microsteps = calcularMicropasosOptimos(vol_to_dispense, caudal, diametro, largo, f_clk);
+				uint32_t pasosTotales = calcularCantidadPasos(volumen_jeringa, diametro, largo, microsteps);
+
+				steps_remaining = pasosTotales;
+
+				// Calcular pasos por segundo para este caso:
+				float tiempo_total_s = (vol_to_dispense / caudal) * 60.0f;
+				float pasosPorSegundo = pasosTotales / tiempo_total_s;
+
+				// Calcular y modificar el ARR
+				uint32_t arr = calcularARR(pasosPorSegundo, f_clk);
+				configurarTimerConARR(&htim3, arr);
+
+				TMC2208_Move();
+			}
+			else
+			{
+				TMC2208_Stop();
+			}
+		}
+		else if( (pantalla_actual == CONF_JERINGA && opcion_actual == VOLVER_JER) || (pantalla_actual == CONF_STEPPER && opcion_actual == VOLVER_STEP) || (pantalla_actual == DISPENSADO && opcion_actual == VOLVER_DISP))
 		{
 			pantalla_actual = PRINCIPAL; // Volver al menú principal
 			opcion_actual = 0;
 			desplazamiento = 0;
-		} else
+		}
+		else
 		{
 			estado_actual = AJUSTANDO_VALOR;
 		}
-	} else if (estado_actual == AJUSTANDO_VALOR)
+	}
+	else if (estado_actual == AJUSTANDO_VALOR)
 	{
 		estado_actual = MENU_PRINCIPAL;
 	}
@@ -638,49 +673,79 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
-	if (htim == &htim3 && motor_running)
+	if(htim == &htim3 && motor_running)
 	{
 		HAL_GPIO_WritePin(STEPPER_STEP_GPIO_Port, STEPPER_STEP_Pin, GPIO_PIN_SET);
 		steps_remaining--;
-		HAL_GPIO_WritePin(STEPPER_STEP_GPIO_Port, STEPPER_STEP_Pin, GPIO_PIN_RESET);
 
-		if (steps_remaining == 0)
+		if(steps_remaining == 0)
 		{
 			TMC2208_Stop();
 		}
+		HAL_GPIO_WritePin(STEPPER_STEP_GPIO_Port, STEPPER_STEP_Pin, GPIO_PIN_RESET);
 	}
 }
 
-/*
- * vol_To_Steps()
- *
- * Descripcion: Calcula los pasos necesarios para dispensar el volumen
- * 				Primero calcula la distancia que debe moverse el carro con la formula de volumen de un cilindo, segun
- * 				el diametro interno de la jeringa configurado previamente. Multiplica por 1000 para convertir de mL a mm3
- * Parametros: vol -> volumen de liquido que se quiere dispensar (mL)
- * return: steps -> pasos que debe hacer el motor para completar el volumen requerido (mm)
- */
-int vol_To_Steps(float vol)
-{
-	float distance_to_move = (4 * vol * 1000) / (PI * syringe_internal_diameter * syringe_internal_diameter);	//Calculo de la distancia que debe recorrer el carro (mm)
-	float steps = (distance_to_move * MOTOR_STEPS_PER_REV * microsteps) / SPINDLE_THREAD_PITCH;	// Calculo de pasos necesarios para mover dicha distancia
-	return steps;
+float calcularLongitudCarrera(float volumen_ml, float diametro_mm, float largo_mm) {
+    if(diametro_mm > 0.0f)
+    {
+        float radio = diametro_mm / 2.0f;
+        float area = M_PI * radio * radio; // mm²
+        return (volumen_ml * 1000.0f) / area; // mm
+    } else
+    {
+        return largo_mm; // el usuario dio largo directamente
+    }
 }
 
-/*
- * flow_To_Time()
- *
- * Descripcion: Calcula el tiempo que va a llevar dispensar el volumen de liquido requerido al flujo seteado.
- * Parametros: 	vol -> volumen de liquido que se quiere dispensar (mL)
- * 				flow -> flujo al que se quiere dispensar el liquido (mL/h)
- * return: time_sec -> tiempo en segundo que va a tardar hasta completar el dispensado
- */
-int flow_To_Time(float vol, float flow)
+uint16_t calcularMicropasosOptimos(float volumen_total_ml, float caudal_ml_min, float diametro_mm, float largo_mm, uint32_t f_clk_timer)
 {
-	int time = (int)(vol / flow); // Tiempo que tarda en dispensar el liquido segun el volumen y flujo seteados (en horas)
-	int time_sec = time * 3600;	// Mismo tiempo en segundos
-	return time_sec;
+    const uint16_t opciones[] = {256, 128, 64, 32, 16, 8, 4, 2, 1};
+    float longitud_mm = calcularLongitudCarrera(volumen_total_ml, diametro_mm, largo_mm);
+    float vueltas = longitud_mm / AVANCE_TORNILLO_MM;
+    float pasos_basicos = vueltas * PASOS_POR_VUELTA;
+    float tiempo_s = (volumen_total_ml / caudal_ml_min) * 60.0f;
+    float frecuencia_base = pasos_basicos / tiempo_s;
+
+    for(int i = 0; i < sizeof(opciones)/sizeof(opciones[0]); i++)
+    {
+        float frecuencia_micro = frecuencia_base * opciones[i];
+        float arr = f_clk_timer / frecuencia_micro;
+        if(arr <= 65535.0f)
+        {
+            return opciones[i];
+        }
+    }
+    return 1; // mínimo posible
 }
+
+uint32_t calcularCantidadPasos(float volumen_total_ml, float diametro_mm, float largo_mm, uint16_t microstepping)
+{
+    float longitud_mm = calcularLongitudCarrera(volumen_total_ml, diametro_mm, largo_mm);
+    float vueltas = longitud_mm / AVANCE_TORNILLO_MM;
+    float pasos_totales = vueltas * PASOS_POR_VUELTA * microstepping;
+    return (uint32_t)(pasos_totales + 0.5f); // redondeo al entero más cercano
+}
+
+uint32_t calcularARR(float pasosPorSegundo, uint32_t f_clk_timer)
+{
+    if(pasosPorSegundo <= 0.0f)
+    	return 65535;
+    float arr = f_clk_timer / pasosPorSegundo;
+    if(arr > 65535.0f)
+    	return 65535;
+
+    return (uint32_t)(arr + 0.5f); // redondeo al entero más cercano
+}
+
+void configurarTimerConARR(TIM_HandleTypeDef *htim, uint32_t arr)
+{
+    __HAL_TIM_DISABLE(htim);
+    __HAL_TIM_SET_AUTORELOAD(htim, arr);
+    __HAL_TIM_SET_COUNTER(htim, 0);
+}
+
+
 
 /*
  * TMC2208_Move()
@@ -691,15 +756,9 @@ int flow_To_Time(float vol, float flow)
  *
  * return: void
  */
-void TMC2208_Move(int steps, int time)
+void TMC2208_Move()
 {
-	float t_interrupt = steps / time;
-	float ARR = (t_interrupt * 72000000) / TIM3->PSC;
-	__HAL_TIM_SET_AUTORELOAD(&htim3, ARR);
-
 	motor_running = true;
-
-	// Iniciar el temporizador en modo interrupción
 	HAL_TIM_Base_Start_IT(&htim3);
 
 }
